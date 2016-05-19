@@ -1,0 +1,5 @@
+[ui]
+username = jordan0102 <jordan.cambe@yahoo.fr>
+
+[paths]
+default = ssh://hg@bitbucket.org/bolozna/event-based-networks

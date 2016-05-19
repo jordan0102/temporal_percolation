@@ -1,0 +1,758 @@
+#ifndef EVENTLIST
+#define EVENTLIST
+
+#include <algorithm>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <map>
+#include <stdlib.h>
+#include <math.h>
+#include <sys/stat.h>
+#include <stdint.h> //For the type sizes
+#include <vector>
+#include <map>
+#include "events.h"
+#include "lcelib/Randgens.H"
+
+
+template<class EventType> 
+class EventList{
+ private:
+  int numberOfNodes; //-1 if not known  
+  void setSizeByFile(char* fileName);
+  bool stdSorted;
+  void swapLinkSequences(size_t index1,size_t index2);
+
+ public:
+  vector<EventType> events; // The event vector
+  size_t size;
+  bool normalized;
+  bool timeSorted;
+  bool stimeSorted;
+  timestamp startTime;
+  timestamp totalTime;
+
+  bool isTimeSorted();//is time sorted
+  bool isSDTSorted();//is sorted according to Source, then Destination, then Time
+
+  void sort_sdt();//sorts the eventList according to Source, then Destination, then Time
+  void sort_time();//sorts the eventList according to Time
+  void sort_stime();//sorts the eventList according to Source, then Time, then Destination
+
+  void print();
+  
+  void DAG(vector<map<string, int> >& dag, int Delta, bool allowReturn, bool directed);
+  void DAGfile(string fileOut, int Delta, bool allowReturn, bool directed);//Makes the DAG
+  
+  EventList(size_t size=0,timestamp startTime=0,timestamp totalTime=0); //constructor
+
+  void makeTauZeroEquivalentList(vector<EventWithTime> taus, size_t repeats, int seed=1234); //should it be a constructor?
+  //void makeLinkIetPreservingList(EventNet<EventWithTime> & eventNet,int seed);
+  void offsetShuffle(int seed);
+  void linksequenceShuffle(int seed);
+
+  int getNumberOfNodes(); //counts the nodes if needed
+  int readFile_sdt(char* fileName);//create the eventList from the file fileName, which has the following form : source destination time
+  int readFile_mobile(char* fileName);
+  int readFile_binary(char* fileName);
+  int writeFile_binary(char* fileName);
+  int writeFile_tsd(char* fileName);
+
+  EventType& operator[](size_t index);
+  void normalizeNodeIndices(size_t* oldIndices);
+  void normalizeNodeIndices();
+  void timeShuffle();
+
+  void addEvent(EventType eve);
+
+  void addReversed();//add to the eventList the reversed events of each current events. 
+  
+  void addIndex();//add an index to each event (original event and reversed one share the same event index)
+
+  void findTimeWindowSize();
+  timestamp getTimeWindowSize();
+
+  // -> Iterators
+
+  typedef typename vector<EventType>::iterator eventIteratorType;
+
+  class userIterator;
+
+  class userEventIterator {//iterator over the user's events in an eventList
+  public:
+    userIterator* currentUserIterator;       
+    EventType current;
+    userEventIterator(userIterator* currentUserIterator) {      
+      this->currentUserIterator=currentUserIterator;
+    }
+    userEventIterator operator++(){ this->current=*(this->currentUserIterator->eventIterator); (this->currentUserIterator->eventIterator)++;  return *this;}
+    userEventIterator operator++(int dummy){++(*this);} //copy of previous
+    EventType& operator*(){return *(this->currentUserIterator->eventIterator);}
+    bool operator!=(eventIteratorType other) {return (this->currentUserIterator->eventIterator)!=other; }
+  };
+
+  class userIterator{//iterator over the users of an eventList
+  public:
+    eventIteratorType eventIteratorEnd;
+    eventIteratorType eventIterator;           
+    nodeindex user;    
+  userIterator(eventIteratorType begin, eventIteratorType end) : eventIterator(begin), eventIteratorEnd(end){this->user=(*(this->eventIterator)).source;}
+    userEventIterator operator*(){return userEventIterator(this); }
+    userIterator operator++(){
+      while((*this->eventIterator).source==user){this->eventIterator++;} //This should be optimized away with branch prediction? Or should we have additional if statement?
+      this->user=(*this->eventIterator).source;
+    }
+    userIterator operator++(int dummy){++(*this);}
+    bool finished(){return !(this->eventIteratorEnd!=this->eventIterator);}
+    bool operator!=(eventIteratorType other) { return this->eventIterator!=other; }
+    eventIteratorType& end(){if ( (*(this->eventIterator)).source!=this->user  ){return this->eventIterator; }else{return this->eventIteratorEnd;}}
+  };
+
+  eventIteratorType end(){return this->events.end();}
+  userIterator iterUsers(){return userIterator(events.begin(),events.end()); }
+  // <- Iterators
+  
+  typedef typename vector<EventType>::iterator evtite;
+  
+};
+
+
+
+
+template<class EventType> 
+void EventList<EventType>::offsetShuffle(int seed){
+  //Check that the eventlist is properly sorted.
+  if (!this->isSDTSorted()) this->sort_sdt();
+  
+  RandNumGen<> rands(seed);
+  timestamp timeWindow=this->getTimeWindowSize();
+
+  //iterate through all the events in all edges.
+  int i=0;
+  while(i<events.size()){
+    timestamp offset = rands.next(timeWindow);
+    EventType currentEdge=this->events[i];
+    while(this->events[i].source==currentEdge.source && this->events[i].dest==currentEdge.dest){
+      timestamp newTime=events[i].getTime()+offset;
+      if (newTime>this->totalTime) newTime=newTime-timeWindow; //periodic bc
+      this->events[i].setTime(newTime);
+      i++;
+    }
+  }
+}
+
+template<class EventType> 
+void EventList<EventType>::linksequenceShuffle(int seed){
+  //Check that the eventlist is properly sorted.
+  if (!this->isSDTSorted()) this->sort_sdt();
+  this->stdSorted=false; //after the shuffling it is no longer sorted
+
+  RandNumGen<> rands(seed);
+
+  vector<size_t> edgeEvents; //index of first event in each edge
+  size_t i=0;
+  while(i<events.size()){
+    edgeEvents.push_back(i);
+    EventType currentEdge=this->events[i];
+    while(this->events[i].source==currentEdge.source && this->events[i].dest==currentEdge.dest){
+      i++;
+    }
+  }  
+
+  //shuffle edgeEvents list
+  for (size_t edgeIndex=0;edgeIndex<edgeEvents.size();edgeIndex++){
+    size_t newEdgeIndex=edgeIndex+rands.next(edgeEvents.size()-edgeIndex);
+    this->swapLinkSequences(edgeEvents[edgeIndex],edgeEvents[newEdgeIndex]);
+    //size_t tempIndex=edgeEvents[newEdgeIndex];
+    edgeEvents[newEdgeIndex]=edgeEvents[edgeIndex];
+    //edgeEvents[edgeIndex]=tempIndex;
+  }
+
+}
+
+template<class EventType> 
+void EventList<EventType>::swapLinkSequences(size_t index1,size_t index2){
+
+   nodeindex source1=this->events[index1].source;
+   nodeindex dest1=this->events[index1].dest;
+   nodeindex source2=this->events[index2].source;
+   nodeindex dest2=this->events[index2].dest;
+
+   size_t i=index1;
+   while(this->events[i].source==source1 && this->events[i].dest==dest1){
+     this->events[i].source=source2;
+     this->events[i].dest=dest2;
+     i++;
+   }
+
+   i=index2;
+   while(this->events[i].source==source2 && this->events[i].dest==dest2){
+     this->events[i].source=source1;
+     this->events[i].dest=dest1;
+     i++;
+   }
+     
+}
+ 
+
+template<class EventType> 
+EventList<EventType>::EventList(size_t size,timestamp startTime,timestamp totalTime) : events(size)
+{ 
+  //define the characteristics of an eventList 
+ this->size = size;
+ this->numberOfNodes=-1;
+ this->normalized=false;
+ this->startTime=startTime;
+ this->totalTime=totalTime;
+ this->stdSorted=false;
+ this->timeSorted=false;
+ this->stimeSorted=false;
+}
+
+template<class EventType> 
+timestamp EventList<EventType>::getTimeWindowSize(){
+  return this->totalTime - this->startTime;
+}
+
+template<class EventType> 
+void EventList<EventType>::findTimeWindowSize(){
+  if (this->events.size()==0) return;
+  timestamp minTime=this->events[0].getTime();
+  timestamp maxTime=this->events[0].getTime();
+
+  for (int i=0;i<this->events.size();++i){
+    timestamp time = this->events[i].getTime();
+    if(time>maxTime) maxTime=time;
+    if(time<minTime) minTime=time;
+  }
+  this->startTime=minTime;
+  this->totalTime=maxTime;
+  
+}
+
+//template<class EventType>
+//void EventList<EventType>::makeLinkIetPreservingList(EventNet<EventWithTime> & eventList,int seed=1234){
+//}
+
+/*
+template<class EventType>
+void EventList<EventType>::makeLinkIetPreservingList(EventList<EventWithTime> & eventList,int seed=1234){
+  // check that the evenlist is sorted properly
+  if (eventList.isSDTSorted()){
+    cerr << "Error: the eventList needs to be sorted with SDT.\n" ;
+    return;
+  }
+
+  timestamp timeWindowSize=eventList.totalTime- eventList.startTime;
+  timestamp startTime=eventList.startTime;
+  this->startTime=eventList.startTime;
+  this->totalTime=eventList.totalTime;
+
+  RandNumGen<> rands(seed);
+  
+  vector<timestamp> ietVector;
+  
+  size_t index=0;
+  while (index<eventList.size){
+    timestamp initialTime=startTime+rands(timeWindowSize);
+    vector<timestamp> iets;
+    EventType event=eventList[index];
+    nodeindex s=event.getSource();
+    nodeindex d=event.getDest();
+    while (event.getSource()==s && event.getDest()==d){
+      
+    }
+  }
+}
+*/
+
+template<class EventType> 
+void EventList<EventType>::makeTauZeroEquivalentList(vector<EventWithTime> taus, size_t repeats, int seed){
+  /* Clears this eventList and creates a new one where 
+     
+   - assume periodic boundaries when calculating taus:
+       tau = T / (n+1)
+
+   */
+  size_t cut=10000;
+  size_t nCut=0;
+  size_t nZero=0;
+
+  RandNumGen<> rands(seed);
+
+  this->events.clear();
+  timestamp oldTimeWindow=this->totalTime - this->startTime;
+  timestamp newTimeWindow=oldTimeWindow*repeats;
+  size_t newSize=0;
+  for (vector<EventWithTime>::iterator i=taus.begin();i != taus.end(); ++i){
+    nodeindex source=(*i).getSource();
+    nodeindex dest=(*i).getDest();
+    timestamp tau=(*i).getTime();
+    
+
+    size_t equivalentN;
+    if (float(newTimeWindow)/float(tau)>1.0){
+      equivalentN=round(float(newTimeWindow)/float(tau)-1.0);
+
+      if (equivalentN<1){
+	equivalentN=1;
+	nZero++;
+      }
+
+      if (equivalentN>cut){
+	equivalentN=cut;
+	nCut++;
+      }
+    }else{
+      equivalentN=1;
+      nZero++; 
+    }
+
+    for (int j=0;j<equivalentN;++j){
+	timestamp newTime=this->startTime + rands.next(newTimeWindow);
+	EventType newEvent;
+	newEvent.source=source;
+	newEvent.dest=dest;
+	newEvent.setTime(newTime);
+	this->events.push_back(newEvent);
+	newSize++;
+    }
+  }
+
+  cerr << "Number of zero-event edges turned into one-event edges: " << nZero << endl;
+  cerr << "Number of edges for which the number of events was cut: " << nCut << endl;
+
+  //adjust all other members to account for the new events
+  this->stdSorted=false;
+  this->timeSorted=false;
+  this->stimeSorted=false;
+  this->size=newSize;
+  this->totalTime=this->startTime+newTimeWindow;
+
+}
+
+
+template<class EventType> 
+bool EventList<EventType>::isTimeSorted(){
+  return this->timeSorted;
+}
+
+template<class EventType> 
+bool EventList<EventType>::isSDTSorted(){//is sorted according to Source, then Destination, then Time
+  return false;
+}
+
+template<typename EventType>
+void EventList<EventType>::addReversed(){
+  size_t oldsize=this->size;
+  this->size=oldsize*2;
+  this->events.resize(this->size);//resize the eventList
+  typename vector<EventType>::iterator reversed=this->events.begin()+oldsize;
+  for(typename vector<EventType>::iterator i=this->events.begin(); i!=this->events.end()-oldsize;i++){
+    *reversed=i->getReversedEvent();//add the reversed event to the eventList
+    reversed++;
+  }
+}
+
+template<typename EventType>
+void EventList<EventType>::addIndex(){//add an index to each event of the eventList
+  int index=0;
+  while(index < this->size){
+    events[index].setIndex(index);
+    index++;
+  }
+}
+
+template<class EventType> 
+void EventList<EventType>::setSizeByFile(char* fileName){
+  ifstream the_file (fileName);
+  int size=-1;
+  string line;
+  while ( !the_file.eof() ){
+    getline(the_file, line);
+    size++;
+  }
+  the_file.close();
+  this->events.clear();
+  this->events.resize(size);
+  this->size = size; 
+}
+
+
+template<class EventType> 
+int EventList<EventType>::readFile_sdt(char* fileName){
+  if (this->size==0) this->setSizeByFile(fileName);
+
+      ifstream the_file (fileName);
+      // Always check to see if file opening succeeded
+      if ( !the_file.is_open() ){
+	cerr<<"Could not open file\n";
+	return 0;
+      }
+      size_t eventIndex=0;
+      while (!the_file.eof() && eventIndex<this->size){
+	this->events[eventIndex].readFromFile_sdt(the_file);
+	eventIndex++;
+      }
+      the_file.close();
+      return 1;
+}
+
+
+template<class EventType> 
+int EventList<EventType>::readFile_mobile(char* fileName){
+  if (this->size==0) this->setSizeByFile(fileName);
+
+      ifstream the_file (fileName);
+      if ( !the_file.is_open() ){
+	cerr<<"Could not open file\n";
+	return 0;
+      }
+      size_t eventIndex=0;
+      while (!the_file.eof()){
+	//this->events[eventIndex]=EventType(the_file);	
+	this->events[eventIndex].readFromFile_mobile(the_file);	
+	eventIndex++;
+      }
+      the_file.close();
+      return 1;
+}
+
+template<class EventType> 
+int EventList<EventType>::writeFile_binary(char* fileName){
+
+  //ofstream the_file(fileName, ios::out | ios::binary);
+  ofstream the_file (fileName,ofstream::binary);
+
+
+  if ( !the_file.is_open() ){
+    cerr<<"Could not open file\n";
+    return 0;
+  }
+  //size_t size = sizeof(this->events) * this->size;
+  //the_file.write((const char*) &this->events, size);
+
+  //char * buffer;
+  // buffer = new char [size];
+  //buffer = (char*) &(this->events);
+  for(int i=0;i<this->size;i++)
+    the_file.write ((char*)&this->events[i],sizeof(EventType));
+
+
+  the_file.close();
+  return 1;
+}
+
+template<class EventType> 
+int EventList<EventType>::writeFile_tsd(char* fileName){
+  ofstream the_file (fileName);
+
+  if ( !the_file.is_open() ){
+    cerr<<"Could not open file\n";
+    return 0;
+  }
+  for(int i=0;i<this->size;i++)
+    the_file << "0" << " " << events[i].source << " " <<this->events[i].dest <<endl;
+    //the_file << this->events[i].time << " " << events[i].source << " " <<this->events[i].dest <<endl;
+  the_file.close();
+  return 1;
+}
+
+
+
+
+template<class EventType> 
+int EventList<EventType>::readFile_binary(char* fileName){
+  //Get the file size in bytes.
+  struct stat results;
+  size_t fileSize;
+  if (stat(fileName, &results) == 0)
+    fileSize=results.st_size;
+  else return 0;
+
+  //Check that the file size is multiple of EventType size.
+  if(fileSize%sizeof(EventType)!=0){ 
+    cerr << "Size of the file doesn't match the EventType size." << endl;
+    return 0;
+  }
+  size_t size=fileSize/sizeof(EventType);
+
+  fstream the_file(fileName, ios::in | ios::binary);
+  if ( !the_file.is_open() ){
+    cerr<<"Could not open file\n";
+    return 0;
+  }
+
+  this->size=size;
+  this->events.clear();
+  this->events.resize(size);
+  for(int i=0;i<this->size;i++)
+    the_file.read((char*) &this->events[i], sizeof(EventType));
+
+  the_file.close();
+
+
+  this->numberOfNodes=-1;
+  return 1;
+}
+
+
+template<class EventType> 
+EventType& EventList<EventType>::operator[](size_t index){
+  return this->events[index];
+}
+
+template<class EventType> 
+void EventList<EventType>::normalizeNodeIndices(size_t* oldIndices){
+  map<unsigned long, unsigned long> nodeMap;
+
+  for (int i=0;i<this->size;i++){
+    unsigned source=this->events[i].source;
+    unsigned dest=this->events[i].dest;
+    unsigned newSource;
+    unsigned newDest;
+
+    if (nodeMap.find(source) == nodeMap.end()){
+      newSource=nodeMap.size();
+      oldIndices[newSource]=source;
+      nodeMap.insert(make_pair(source, newSource));
+      this->events[i].source = newSource;
+    } else{
+      this->events[i].source=nodeMap[source];
+    }
+
+
+    if (nodeMap.find(dest) == nodeMap.end()){
+      newDest=nodeMap.size();
+      oldIndices[newDest]=dest;
+      nodeMap.insert(make_pair(dest, newDest));
+      this->events[i].dest = newDest;
+    } else{
+      this->events[i].dest=nodeMap[dest];
+    }    
+  }
+  this->normalized=true;
+  this->numberOfNodes=nodeMap.size();
+}
+
+template<class EventType> 
+void EventList<EventType>::normalizeNodeIndices(){
+  map<unsigned long, unsigned long> nodeMap;
+
+  for (int i=0;i<this->size;i++){
+    unsigned source=this->events[i].source;
+    unsigned dest=this->events[i].dest;
+    unsigned newSource;
+    unsigned newDest;
+
+    if (nodeMap.find(source) == nodeMap.end()){
+      newSource=nodeMap.size();
+      nodeMap.insert(make_pair(source, newSource));
+      this->events[i].source = newSource;
+    } else{
+      this->events[i].source=nodeMap[source];
+    }
+
+
+    if (nodeMap.find(dest) == nodeMap.end()){
+      newDest=nodeMap.size();
+      nodeMap.insert(make_pair(dest, newDest));
+      this->events[i].dest = newDest;
+    } else{
+      this->events[i].dest=nodeMap[dest];
+    }    
+  }
+  this->normalized=true;
+  this->numberOfNodes=nodeMap.size();
+}
+
+
+template<class EventType> 
+int EventList<EventType>::getNumberOfNodes(){
+  if (this->numberOfNodes==-1){
+    unsigned maxNode=0;
+    for (int i=0;i<this->size;i++){
+      if (maxNode<this->events[i].source) maxNode=this->events[i].source;
+      if (maxNode<this->events[i].dest) maxNode=this->events[i].dest;
+    }
+
+    if (this->size>0)
+      this->numberOfNodes=maxNode+1;
+    else
+      return 0;
+  }
+  return this->numberOfNodes;
+
+}
+
+template<class EventType> 
+void EventList<EventType>::timeShuffle(){
+  /*
+    Time shuffling of events. 
+    In practice this is done by shuffling everything else but the times. This way
+    if the times are sorted, they are also sorted after this shuffling.
+   */
+
+   for(size_t i = 0; i < this->size-1;i++){
+    size_t j=i+rand()%(this->size-i);
+    EventType tempEvent = EventType();
+    this->events[i].copyAllButTime(tempEvent);
+    this->events[j].copyAllButTime(this->events[i]);
+    tempEvent.copyAllButTime(this->events[j]);
+  }
+ 
+}
+
+template<class EventType> 
+void EventList<EventType>::sort_sdt(){//sort the eventList according to the source, then the destination, then the time
+  sort(this->events.begin(), this->events.end(), compare_sdt<EventType>);
+  this->timeSorted=false;
+  this->stdSorted=true;
+  this->stimeSorted=false;
+  //sort(this->events, this->events+this->size, compare_sdt<EventType>);
+}
+
+template<class EventType> 
+void EventList<EventType>::sort_time(){//sort the eventList according to the time
+  sort(this->events.begin(), this->events.end(), compare_time<EventType>);
+  this->timeSorted=true;
+  this->stdSorted=false;
+  this->stimeSorted=false;
+  //sort(this->events, this->events+this->size, compare_time<EventType>);
+}
+
+template<class EventType> 
+void EventList<EventType>::sort_stime(){//sort the eventList according to the source, then the time, then the destination 
+  sort(this->events.begin(), this->events.end(), compare_stime<EventType>);
+  this->timeSorted=false;
+  this->stdSorted=false;
+  this->stimeSorted=true;
+  //sort(this->events, this->events+this->size, compare_time<EventType>);
+}
+
+template<class EventType> 
+void EventList<EventType>::print(){
+  for(typename vector<EventType>::iterator i=this->events.begin(); i!=this->events.end();i++){
+    cout << (*i).getLongEventInformation() << "\n";
+  }
+}
+
+template<class EventType> 
+void EventList<EventType>::addEvent(EventType eve){
+  events.push_back(eve);
+  this->size+=1;
+}
+
+template<class EventType> 
+void EventList<EventType>::DAGfile(string fileOut, int delta, bool allowReturn, bool directed){//make the DAG
+    	
+	this->addIndex();//add index to each event
+    	
+	this->addReversed();//add a reversed event for each event in the eventList
+
+	this->sort_stime();//sort following the order source, time, destination
+	
+	
+	ofstream outfile ((char*)fileOut.c_str());//open the file where the DAG will be saved
+	if (outfile.is_open()){
+	
+	 timestamp timeBetween;//define the timeBetween variable
+	 
+	 for(EventList<EventType>::userIterator uiter=this->iterUsers();uiter!=this->end();uiter++){//for each user of the eventList
+	  deque<EventType> lastReversedEvents;//define the deque of events lastReversedEvents
+          for(EventList<EventType>::userEventIterator ueiter=*uiter;ueiter!=uiter.end(); ueiter++){//for each user's event in the eventList
+           EventType event= *ueiter;//we get the current event
+           if(event.isReversed()==true){
+	    lastReversedEvents.push_back(event);//if it is a reversed event, add the event to the deque lastReversedEvents
+	   }
+	   else{
+	    
+	    while((lastReversedEvents.size() != 0) && ((event.getTime())-(lastReversedEvents[0].getTime())>delta)){
+	     lastReversedEvents.erase(lastReversedEvents.begin());
+	    }//we remove from lastReversedEvents the events, which didn't happen within delta from the current event. So, after this loop only remains in lastReversedEvents events, which share one node with the current event and which happened within delta t.
+	    
+	    typename deque<EventType>::iterator oldEvent;
+	    oldEvent = lastReversedEvents.begin();//define the iterator over the deque named oldEvent
+	    while(oldEvent!=lastReversedEvents.end()){//for each event in lastReversedEvent
+	     EventType oldEve= *oldEvent;//we get the old event from the iterator
+	     EventType oldEveRev;//define the reversed event of the old event
+	     if (allowReturn==true or event.dest != oldEve.dest){//if there is a triggering between the current event and the old event
+	      timeBetween = event.getTime() - oldEve.getTime();//compute the time between the current event and the old event
+	      oldEveRev = oldEve.getReversedEvent();//reverse the old event
+	      outfile << oldEveRev.getIndex() << " " << event.getIndex() << " " << timeBetween << endl;//save in the DAG file the an edge from the reversed old event to the current event with a weight on the edge equals to time between them. 
+	      
+	     }
+	     oldEvent++;//increment the iterator
+	    }
+	    
+	    if(directed == false){
+	     lastReversedEvents.push_back(event.getReversedEvent());
+	    }//if the dataset is undirected, then allow the information to spread in both directions, so add the reversed current event to the deque lastReversedEvents
+	   }
+	  }
+	}
+	   
+	outfile.close();
+	} 
+}
+
+
+template<class EventType> 
+void EventList<EventType>::DAG(vector<map<string, int> >& dag, int delta, bool allowReturn, bool directed){//make the DAG
+    	
+	this->addIndex();//add index to each event
+	
+	this->addReversed();//add a reversed event for each event in the eventList
+
+	this->sort_stime();//sort following the order source, time, destination
+	
+	
+	 timestamp timeBetween;//define the timeBetween variable
+	 map<string, int> dagLink;
+	 
+	 for(EventList<EventType>::userIterator uiter=this->iterUsers();uiter!=this->end();uiter++){//for each user of the eventList
+	  deque<EventType> lastReversedEvents;//define the deque of events lastReversedEvents
+          for(EventList<EventType>::userEventIterator ueiter=*uiter;ueiter!=uiter.end(); ueiter++){//for each user's event in the eventList
+           EventType event= *ueiter;//we get the current event
+           if(event.isReversed()==true){
+	    lastReversedEvents.push_back(event);//if it is a reversed event, add the event to the deque lastReversedEvents
+	   }
+	   else{
+	    
+	    while((lastReversedEvents.size() != 0) && ((event.getTime())-(lastReversedEvents[0].getTime())>delta)){
+	     lastReversedEvents.erase(lastReversedEvents.begin());
+	    }//we remove from lastReversedEvents the events, which didn't happen within delta from the current event. So, after this loop only remains in lastReversedEvents events, which share one node with the current event and which happened within delta t.
+	    
+	    typename deque<EventType>::iterator oldEvent;
+	    oldEvent = lastReversedEvents.begin();//define the iterator over the deque named oldEvent
+	    while(oldEvent!=lastReversedEvents.end()){//for each event in lastReversedEvent
+	     EventType oldEve= *oldEvent;//we get the old event from the iterator
+	     EventType oldEveRev;//define the reversed event of the old event
+	     if (allowReturn==true or event.dest != oldEve.dest){//if there is a triggering between the current event and the old event
+	      timeBetween = event.getTime() - oldEve.getTime();//compute the time between the current event and the old event
+	      oldEveRev = oldEve.getReversedEvent();//reverse the old event
+	      
+	      dagLink["sourceEvent"] = oldEveRev.getIndex();
+	      dagLink["destEvent"] = event.getIndex();
+	      dagLink["timeBetween"] = timeBetween;
+	      dag.push_back(dagLink);
+	      dagLink.clear();
+	      //save in the DAG file the an edge from the reversed old event to the current event with a weight on the edge equals to time between them. 
+	     }
+	     oldEvent++;//increment the iterator
+	    }
+	    
+	    if(directed == false){
+	     lastReversedEvents.push_back(event.getReversedEvent());
+	    }//if the dataset is undirected, then allow the information to spread in both directions, so add the reversed current event to the deque lastReversedEvents
+	   }
+	  }
+	}
+	    
+}
+
+
+
+
+#endif //EVENTLIST

@@ -1,0 +1,237 @@
+#ifndef EVENTS
+#define EVENTS
+
+#include <stdlib.h>
+#include <iostream>
+#include <string>
+#include <fstream>
+
+//#define nodeindex uint32_t
+//#define eventindex uint32_t
+//#define timestamp uint32_t
+
+#define nodeindex unsigned
+#define eventindex unsigned
+#define timestamp unsigned
+
+#define NOTIME 0
+
+using namespace std;
+
+
+//void Event::Event(const Event &e){
+//  this->source=e.source;
+//  this->dest=e.dest;
+//}
+
+
+
+template<typename TimestampPolicy,typename ReversePolicy>
+//template <typename OutputPolicy, typename LanguagePolicy>
+class Event : private TimestampPolicy, private ReversePolicy { 
+  using ReversePolicy::isReversed;
+
+ public:
+  nodeindex source;
+  nodeindex dest;
+  
+  Event creation();
+  nodeindex getSource();
+  nodeindex getDest();
+};
+
+
+class NoReverse
+{
+public:
+bool isReversed(); //always returns false
+};
+
+
+class Reverse
+{
+private:
+bool reversed;
+
+public:
+bool isReversed();
+void getReversed();
+};
+
+
+class NoTime
+{
+public:
+bool isTimeStamped(); //always returns false
+void readFromFile_mobile(ifstream &the_file);
+void readFromFile_tsd(ifstream &the_file);
+void copyAllButTime(Event& targetEvent);
+};
+
+class WithTime 
+{ 
+ public:
+  bool isTimeStamped();
+  timestamp time;
+  timestamp getTime() const;
+  void readFromFile_mobile(ifstream &the_file);
+  void readFromFile_tsd(ifstream &the_file);
+  void copyAllButTime(Event& targetEvent);
+};
+ 
+class EventWithDuration
+{
+  unsigned source;
+  unsigned dest;
+  unsigned time;
+  unsigned duration;
+};
+
+
+//=======================================================
+//=======================================================
+
+template<typename TimestampPolicy,typename ReversePolicy>
+nodeindex Event<TimestampPolicy, ReversePolicy>::getSource(){
+  return this->source;
+}
+
+template<typename TimestampPolicy,typename ReversePolicy>
+nodeindex Event<TimestampPolicy, ReversePolicy>::getDest(){
+  return this->dest;
+}
+
+template<typename TimestampPolicy,typename ReversePolicy>
+void Event<TimestampPolicy, ReversePolicy>::readFromFile_mobile(ifstream &the_file){
+  unsigned dummy;
+  the_file >> dummy;
+  the_file >> this->source;
+  the_file >> dummy;
+  the_file >> this->dest;
+  the_file >> dummy;
+}
+
+template<typename TimestampPolicy,typename ReversePolicy>
+void Event<TimestampPolicy, ReversePolicy>::readFromFile_tsd(ifstream &the_file){
+  unsigned dummy;
+  the_file >> dummy;
+  the_file >> this->source;
+  the_file >> this->dest;
+}
+
+template<typename TimestampPolicy,typename ReversePolicy>
+void Event<TimestampPolicy, ReversePolicy>::copyAllButTime(Event& targetEvent){
+  targetEvent.source=this->source;
+  targetEvent.dest=this->dest;
+}
+
+template<typename TimestampPolicy,typename ReversePolicy>
+Event Event<TimestampPolicy, ReversePolicy>::creation(){
+  Event<TimestampPolicy, ReversePolicy> evt;
+  evt.source=0;
+  evt.dest=0;
+  if TimestampPolicy==WithTime{
+  evt.time=0
+  }
+}
+
+//=======================================================
+//=======================================================
+bool NoReverse::isReversed(){
+  return false;
+}
+
+
+bool Reverse::isReversed(){
+  return true;
+}
+
+void Reverse::getReversed(){
+  Event<TimestampPolicy,Reverse> newEvent;
+  if TimestampPolicy==WithTime{
+  newEvent.time=this->time;
+  }
+  newEvent.source=this->dest;
+  newEvent.dest=this->source;
+  newEvent.reversed = (not this->reversed);
+}
+
+//=======================================================
+//=======================================================
+
+//template<class EventWithTime>
+bool NoTime::isTimeStamped(){
+  return false;
+}
+
+bool WithTime::isTimeStamped(){
+  return true;
+}
+
+timestamp WithTime::getTime() const{
+  return this->time;
+}
+
+
+void WithTime::readFromFile_mobile(ifstream &the_file){
+  unsigned dummy;
+  the_file >> this->time;
+  the_file >> this->source;
+  the_file >> dummy;
+  the_file >> this->dest;
+  the_file >> dummy;
+  
+}
+
+void WithTime::readFromFile_tsd(ifstream &the_file){
+  the_file >> this->source;
+  the_file >> this->dest;
+  the_file >> this->time;
+}
+
+void WithTime::copyAllButTime(EventWithTime& targetEvent){
+  targetEvent.source=this->source;
+  targetEvent.dest=this->dest; 
+}
+
+
+//=======================================================
+//=======================================================
+
+template<class EventType>
+bool compare_sdt(const EventType & event1,const EventType & event2){
+  if (event1.source!=event2.source)
+    return event1.source<event2.source;
+  else if (event1.dest!=event2.dest)
+    return event1.dest<event2.dest;
+  else
+    return event1.getTime()<event2.getTime();
+}
+
+template<class EventType>
+bool compare_stime(const EventType & event1,const EventType & event2){
+  if (event1.source!=event2.source)
+    return event1.source<event2.source;
+  else
+    return event1.getTime()<event2.getTime();
+}
+
+template<class EventType>
+bool compare_time(const EventType & event1,const EventType & event2){
+  return event1.getTime()<event2.getTime();
+}
+
+/*
+template<class EventType>
+EventType NoneEventMaker(){
+  EventWithTime NoneEvent;
+  NoneEvent.source=0;
+  NoneEvent.dest=0;
+  NoneEvent.time=0;
+  return NoneEvent;
+}
+*/
+
+
+
+#endif //EVENTS
