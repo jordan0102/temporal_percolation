@@ -17,7 +17,7 @@ int main ()
 	
 	string fileOut = "DAG.edg";//the file where the DAG will be saved
 	
-	int delta=3;//the dt for which we compute the DAG
+	int delta=2;//the dt for which we compute the DAG
 	
 	bool allowReturn = true;//allow the 'ping pong' effect between 2 nodes. 
 	
@@ -28,7 +28,7 @@ int main ()
 	
 	evenements.readFile_sdt((char*)fileIn.c_str()); //create the eventList from the file fileIn 
 	
-	evenements.DAG(fileOut, delta, allowReturn, directed); //makes the DAG
-	
+	evenements.DAGfile(fileOut, delta, allowReturn, directed); //makes the DAG
+		
 	return 0;
 }
