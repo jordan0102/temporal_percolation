@@ -116,8 +116,8 @@ public:
     fileLenDist.close();
   }
   
-  int getGiantLen(){//get the giant length from the length distribution
-    int giant=0;
+  float getGiantLen(){//get the giant length from the length distribution
+    float giant=0;
     for (typename std::map<ValueType,IndexType>::const_iterator i = lenDistribution->begin();i!=lenDistribution->end();i++) {
       if(i->first > giant){
         giant = i->first;
@@ -126,14 +126,25 @@ public:
     return giant;
   }
   
-  int getScdGiantLen(int giant){//get the giant size from the size distribution
-    int scdGiant=0;
+  float getScdGiantLen(float giant){//get the giant size from the size distribution
+    float scdGiant=0;
     for (typename std::map<ValueType,IndexType>::const_iterator i = lenDistribution->begin();i!=lenDistribution->end();i++) {
       if(i->first < giant and i->first > scdGiant){
         scdGiant = i->first;
       }
     }
     return scdGiant; 
+  }
+  
+  float getSuscLen(int giant){//compute the susceptibility
+    float s_up=0;
+    float s_down=0;
+    for (typename std::map<ValueType,IndexType>::const_iterator i = lenDistribution->begin();i!=lenDistribution->end();i++) {
+      s_down += (i->first)*(i->second);
+      s_up += (i->first)*(i->first)*(i->second);
+    }
+    
+    return (s_up - (giant*giant))/(s_down - giant);
   }
 
   void setValue(IndexType set, ValueType value){
@@ -262,6 +273,20 @@ public:
     }
     return scdGiant; 
   }
+  
+  float getSuscSize(int giant){//compute the susceptibility
+    
+    float s_up=0;
+    float s_down=0;
+    for (typename std::map<IndexType,IndexType>::const_iterator i = sizeDistribution->begin();i!=sizeDistribution->end();i++) {
+      s_down += (i->first)*(i->second);
+      s_up += (i->first)*(i->first)*(i->second);
+    }
+    
+    return (s_up - (giant*giant))/(s_down - giant);
+  }
+
+
 
   /* The basic, recursive method for traversing a tree toward the 
    * root. The packing operation becomes very elegant with the 
