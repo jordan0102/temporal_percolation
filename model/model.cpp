@@ -24,7 +24,7 @@ return (-log(proba)/beta);//generate exponentially distributed random number wit
 
 template<typename Generator>
 void generate_sequence_exp(vector<float>& l, int startTime, int endTime, double beta, Generator & generator){//generate in vector l a time sequence exponentially distributed going from startTime to endTime.
-  float tdist = ceil(exp_distr(beta, generator)*1000);//compute the 1st time of the time sequence
+  float tdist = exp_distr(beta, generator);//compute the 1st time of the time sequence
   float trdist;
   bool b=true;
   if (tdist+startTime>endTime){//if it's over endTime stop the function without adding the 1st time.
@@ -35,7 +35,7 @@ void generate_sequence_exp(vector<float>& l, int startTime, int endTime, double 
   }
   
   while(b==true){
-    trdist = ceil(exp_distr(beta, generator)*1000);//compute the new time of the time sequence
+    trdist = exp_distr(beta, generator);//compute the new time of the time sequence
     if(l.back()+trdist > endTime){//if it's over endTime stop the function without adding the new time.
       break;
     }
@@ -87,9 +87,10 @@ for (i=0; i != netSize; i++) {
 return;
 }
 
-bool compare_dag(map<string, int> i, map<string, int> j){//compare 2 elements according to theirs dt
-return (i["timeBetween"]<j["timeBetween"]);
+bool compare_dag(DAGevent i, DAGevent j){//compare 2 elements according to theirs dt
+return (i.timeBetween < j.timeBetween);
 }
+
 
 
 int main(){
@@ -99,19 +100,19 @@ size_t netSize = 1000;//Network size
 
 size_t randseed = 10;//number of seeds for random number generator
 
-float k_ave = 3;//average degree of the network
+float k_ave = 4;//average degree of the network
 
-double beta = 1.5;//parameter of the exponential distribution
+double beta = 2;//parameter of the exponential distribution
 
 int startTime = 0;//starting time of the time window
 
-int endTime = 1000;//ending time of the time window
+int endTime = 1;//ending time of the time window
 //===========================	
 
 //==========DAG Input=============
 string fileOut = "DAG.edg";//the file where the DAG will be saved, only if you want it to be saved, then uncomment the call of function DAGfile at line 137 
 	
-int delta=1000;//the dt for which we compute the DAG
+int delta = (endTime - startTime);//the dt for which we compute the DAG
 	
 bool allowReturn = true;//allow the 'ping pong' effect between 2 nodes. 
 	
@@ -121,7 +122,7 @@ bool directed = false;//is the network directed
 //==========Analysis Input========
 string pathResults = "distri/";//path where to save the distribution results
 
-int step = 20;//the dt step at which measures are taken
+float step = 0.001;//the dt step at which measures are taken
 //===========================
 
 
@@ -140,27 +141,9 @@ eveListGen(events, netSize, k_ave, beta, startTime, endTime, randseed, generator
 //events.DAGfile(fileOut, delta, allowReturn, directed); //save the DAG in a file
 
 
-vector<map<string, int> > dag;//declaration of the vector, which will contain the DAG
+vector<DAGevent> dag;//declaration of the vector, which will contain the DAG
 events.DAG(dag, delta, allowReturn, directed);//creation of the DAG
 sort(dag.begin(),dag.end(),compare_dag);//sort the dag with increasing dt
-/*
-map<string, int> x;
-int y = 0;
-for (vector<map<string, int> >::iterator it=dag.begin(); it!=dag.end(); ++it){
-  x=*it;
-  cout << x["sourceEvent"] << " " << x["destEvent"] << " " << x["timeBetween"] << " " << y << endl;
-  y+=1;
-}
-*/
-
-/*
-cout << "\n" << events.size << "\n\n";
-  for (vector<map<string, int> >::iterator it = dag.begin() ; it != dag.end(); ++it){
-    cout << (*it)["sourceEvent"] << " " << (*it)["destEvent"] << " " << (*it)["timeBetween"];
-    cout << "\n";
-  }
-cout << dag.size() << "\n\n";
-*/
 
 
 DisjointSetsForest<unsigned,true,true,TrackLengths<unsigned,float,true> > ds(events.size/2);//declaration of the disjoint sets forest, having (events.size/2) subsets of 1 event.
@@ -176,23 +159,44 @@ string lenDfile;//declaration of the file name, where the length distribution wi
 stringstream count;
 ofstream giantSize ("giantSize.dat");//open the file where the evolution of the giant component in size will be saved
 ofstream scdGiantSize ("scdGiantSize.dat");//open the file where the evolution of the 2nd giant component in size will be saved
+ofstream susceptibilitySize ("suscSize.dat");//open the file where the evolution of the susceptibility for the size will be saved
 ofstream giantLen ("giantLen.dat");//open the file where the evolution of the giant component in duration will be saved
 ofstream scdGiantLen ("scdGiantLen.dat");//open the file where the evolution of the 2nd giant component in duration will be saved
+ofstream susceptibilityLen ("suscLen.dat");//open the file where the evolution of the susceptibility for the duration will be saved
+ofstream avgDegree ("avgDegree.dat");//open the file where the evolution of the average degree will be saved
 
 int counter=0;
-bool var=false;
-for (vector<map<string, int> >::iterator it = dag.begin() ; it != dag.end(); ++it){//goes over the DAG edges
+int multiple=1;
 
-    ds.mergeSets((*it)["sourceEvent"], (*it)["destEvent"]);//merge 2 events in the disjoint sets forest, when those 2 events are linked in the DAG
+
+vector<int> nodes;
+
+for (vector<DAGevent>::iterator it = dag.begin() ; it != dag.end(); ++it){//goes over the DAG edges
+
+    ds.mergeSets((*it).sourceEvent, (*it).destEvent);//merge 2 events in the disjoint sets forest, when those 2 events are linked in the DAG
     
     
-    if((*it)["timeBetween"] % step ==0 and var == false){//after a certain increase in dt, look at the size distribution, the duration distribution and the giant components in size (LaCC) and duration (LoCC)
+    if(nodes.empty()==true){
+      nodes.push_back((*it).sourceEvent);
+      nodes.push_back((*it).destEvent);
+    }
+    if(find(nodes.begin(), nodes.end(), (*it).sourceEvent) != nodes.end()){}
+    else{
+      nodes.push_back((*it).sourceEvent);}
     
-      cout << (*it)["timeBetween"] << " ";
+    if(find(nodes.begin(), nodes.end(), (*it).destEvent) != nodes.end()){}
+    else{
+      nodes.push_back((*it).destEvent);
+    }
+    
+    
+    if((float)trunc((*it).timeBetween/step)*step == (float)multiple*step){//after a certain increase in dt, look at the size distribution, the duration distribution and the giant components in size (LaCC) and duration (LoCC)
+    
+    
       //cout << "\n sizeDist : \n";
       //ds.printSizeDist();
       count.str("");
-      count << (*it)["timeBetween"];
+      count << (*it).timeBetween;
       sizeDfile=pathResults+"SizeDistribution_"+count.str()+".dat";//update the name of the file
       ds.printFileSizeDist(sizeDfile);//save the distribution in the file
     
@@ -202,25 +206,59 @@ for (vector<map<string, int> >::iterator it = dag.begin() ; it != dag.end(); ++i
       lenDfile=pathResults+"LenDistribution_"+count.str()+".dat";//update the name of the file
       ds.printFileLenDist(lenDfile);//save the distribution in the file
       
-      giantSize << (*it)["timeBetween"] << " " << (float)ds.getGiantSize()/(events.size/2) << endl;//update the LaCC
-      scdGiantSize << (*it)["timeBetween"] << " " << (float)ds.getScdGiantSize(ds.getGiantSize())/(events.size/2) << endl;//update the 2nd LaCC
-      giantLen << (*it)["timeBetween"] << " " << (float)ds.getGiantLen()/(endTime - startTime) << endl;//update the LoCC
-      scdGiantLen << (*it)["timeBetween"] << " " << (float)ds.getScdGiantLen(ds.getGiantLen())/(endTime - startTime) << endl;//update the 2nd LaCC
+      giantSize << (*it).timeBetween << " " << (float)ds.getGiantSize()/(events.size/2) << endl;//update the LaCC
+      scdGiantSize << (*it).timeBetween << " " << (float)ds.getScdGiantSize(ds.getGiantSize())/(events.size/2) << endl;//update the 2nd LaCC
+      susceptibilitySize << (*it).timeBetween << " " << ds.getSuscSize(ds.getGiantSize()) << endl;//update the susceptibility of the size
       
-      var = true;
+      cout << ds.getGiantLen() << "\n";
+      giantLen << (*it).timeBetween << " " << (float)ds.getGiantLen()/(endTime - startTime) << endl;//update the LoCC
+      scdGiantLen << (*it).timeBetween << " " << (float)ds.getScdGiantLen(ds.getGiantLen())/(endTime - startTime) << endl;//update the 2nd LaCC
+      susceptibilityLen << (*it).timeBetween << " " << ds.getSuscLen(ds.getGiantLen()) << endl;//update the susceptibility of the length
+      
+      /*
+      sort(source.begin(),source.end());
+      int track = -1;
+      int deg=0;
+      for(vector<int>::iterator src = source.begin() ; src != source.end(); ++src){
+        if(track != *src and track == -1){
+          track = *src;
+          deg+=1;
+        }
+        else if(track != *src and track != -1){
+          sumDeg+=deg;
+          nb_DAGnodes+=1;
+          
+          track = *src;
+          deg+=1;
+        }
+        else{
+          deg+=1;
+        }
+      }
+      */
+      avgDegree << (*it).timeBetween << " " << (float)counter/nodes.size() << endl;//save the average degree
+      
+      
+      multiple +=1;
     }
     
-    else if ((*it)["timeBetween"] % step !=0){var=false;}
 
     counter+=1;
 }
 giantSize.close();
 scdGiantSize.close();
+susceptibilitySize.close();
 giantLen.close();
 scdGiantLen.close();
+susceptibilityLen.close();
+avgDegree.close();
 
 cout << "\n" << events.size << "\n";
-cout << dag.size();
+cout << dag.size() << "\n";
+cout << nodes.size() << "   "; 
+//for (vector<int>::iterator pr = nodes.begin() ; pr != nodes.end(); ++pr){
+//  cout << " " << *pr;
+//}
 
 return 0;
 }
