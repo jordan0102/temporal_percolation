@@ -5,7 +5,6 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-#include <map>
 #include <stdlib.h>
 #include <math.h>
 #include <sys/stat.h>
@@ -14,6 +13,21 @@
 #include <map>
 #include "events.h"
 #include "lcelib/Randgens.H"
+
+
+class DAGevent{
+  public:
+    int sourceEvent;
+    int destEvent;
+    int timeBetween;
+    
+    DAGevent(){//constructor
+      sourceEvent=0;
+      destEvent=0;
+      timeBetween=0;
+    };
+    
+};
 
 
 template<class EventType> 
@@ -42,7 +56,7 @@ class EventList{
 
   void print();
   
-  void DAG(vector<map<string, int> >& dag, int Delta, bool allowReturn, bool directed);
+  void DAG(vector<DAGevent>& dag, int Delta, bool allowReturn, bool directed);
   void DAGfile(string fileOut, int Delta, bool allowReturn, bool directed);//Makes the DAG
   
   EventList(size_t size=0,timestamp startTime=0,timestamp totalTime=0); //constructor
@@ -699,7 +713,7 @@ void EventList<EventType>::DAGfile(string fileOut, int delta, bool allowReturn, 
 
 
 template<class EventType> 
-void EventList<EventType>::DAG(vector<map<string, int> >& dag, int delta, bool allowReturn, bool directed){//make the DAG
+void EventList<EventType>::DAG(vector<DAGevent>& dag, int delta, bool allowReturn, bool directed){//make the DAG
     	
 	this->addIndex();//add index to each event
 	
@@ -709,7 +723,7 @@ void EventList<EventType>::DAG(vector<map<string, int> >& dag, int delta, bool a
 	
 	
 	 timestamp timeBetween;//define the timeBetween variable
-	 map<string, int> dagLink;
+	 DAGevent dagEvent;
 	 
 	 for(EventList<EventType>::userIterator uiter=this->iterUsers();uiter!=this->end();uiter++){//for each user of the eventList
 	  deque<EventType> lastReversedEvents;//define the deque of events lastReversedEvents
@@ -733,11 +747,11 @@ void EventList<EventType>::DAG(vector<map<string, int> >& dag, int delta, bool a
 	      timeBetween = event.getTime() - oldEve.getTime();//compute the time between the current event and the old event
 	      oldEveRev = oldEve.getReversedEvent();//reverse the old event
 	      
-	      dagLink["sourceEvent"] = oldEveRev.getIndex();
-	      dagLink["destEvent"] = event.getIndex();
-	      dagLink["timeBetween"] = timeBetween;
-	      dag.push_back(dagLink);
-	      dagLink.clear();
+	      
+	      dagEvent.sourceEvent = oldEveRev.getIndex();
+	      dagEvent.destEvent = event.getIndex();
+	      dagEvent.timeBetween = timeBetween;
+	      dag.push_back(dagEvent);
 	      //save in the DAG file the an edge from the reversed old event to the current event with a weight on the edge equals to time between them. 
 	     }
 	     oldEvent++;//increment the iterator

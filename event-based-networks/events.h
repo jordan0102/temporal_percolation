@@ -13,7 +13,7 @@
 
 #define nodeindex unsigned
 #define eventindex unsigned
-#define timestamp unsigned
+#define timestamp float
 
 #define NOTIME 0
 #define DEFAULTDURATION 0
