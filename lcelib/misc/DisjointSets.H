@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <stdlib.h>
+#include <deque>
 
 /**
  * Data structures for disjoint sets forests. See the DisjointSets class for documentation.
@@ -239,7 +240,25 @@ public:
     }    
     std::cout << std::endl;
   }
+  
+  IndexType getForestSize(){
+    return size;
+  }
+  
+  IndexType getFather(IndexType i){
+    return fathers[i];
+  }
+  
+  void getFathersList(deque<IndexType>& fathersvect){
+    for(IndexType i=0; i<size; i++){
+      if(find(fathersvect.begin(), fathersvect.end(), fathers[i]) != fathersvect.end()){
+        continue;
+      }
+      else{fathersvect.push_back(fathers[i]);}
+    }
+  }
 
+  
   void printSizeDist(){
     for (typename std::map<IndexType,IndexType>::const_iterator i = sizeDistribution->begin();i!=sizeDistribution->end();i++) {
       std::cout << i->first << " " << i->second << std::endl;
